@@ -10,10 +10,14 @@ from transformers import (
     AutoTokenizer,
     AutoModelForSequenceClassification,
     TrainingArguments,
-    Trainer
+    Trainer,
+    logging as hf_logging
 )
 from sklearn.metrics import accuracy_score, f1_score
 from sklearn.model_selection import train_test_split
+
+# Set verbosity for the transformers library
+hf_logging.set_verbosity_info()
 
 
 def compute_metrics(p):
@@ -91,11 +95,8 @@ def main(config):
     # 5. Define Training Arguments
     print("Setting up training arguments...")
 
-    # --- FIX ---
-    # The error indicates a very old version of the `transformers` library.
-    # The best solution is to update your libraries (`pip install --upgrade transformers datasets`).
-    # As a fallback, this version removes evaluation during training to ensure compatibility.
-    # The model will still be evaluated once after training is complete.
+    # We enable evaluation and saving at the end of each epoch.
+    # The best model according to the 'f1' score will be loaded at the end of training.
     training_args = TrainingArguments(
         output_dir=config['output_dir'],
         num_train_epochs=config['num_epochs'],
@@ -105,7 +106,12 @@ def main(config):
         weight_decay=0.01,
         logging_dir='./logs',
         logging_steps=100,
-        report_to="none"  # Disables integration with wandb, etc.
+        eval_strategy="epoch",
+        save_strategy="epoch",
+        load_best_model_at_end=True,
+        metric_for_best_model="f1",
+        greater_is_better=True,
+        report_to="none"  # Disable reporting to any external service
     )
 
     # 6. Instantiate Trainer
@@ -113,7 +119,7 @@ def main(config):
         model=model,
         args=training_args,
         train_dataset=tokenized_train_dataset,
-        eval_dataset=tokenized_test_dataset,  # The test set is still passed for the final evaluation
+        eval_dataset=tokenized_test_dataset,
         compute_metrics=compute_metrics,
         tokenizer=tokenizer,
     )
@@ -149,7 +155,7 @@ if __name__ == '__main__':
         "data_path": os.path.join(project_root, 'data', 'processed', 'processed_news.csv'),
         "output_dir": os.path.join(project_root, 'models', 'fake-news-detector'),
         "num_labels": 2,
-        "num_epochs": 1,  # Start with 1 epoch for a quick initial run
+        "num_epochs": 3,  # Increased epochs for better training
         "batch_size": 16,  # Adjust based on your GPU memory
         "max_token_length": 512  # Max length for BERT-like models
     }
