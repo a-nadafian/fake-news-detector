@@ -40,15 +40,17 @@ def main(config):
     print(f"Model loaded successfully on device: {device}")
 
     # 2. Load and Prepare Test Data
-    print(f"Loading dataset from: {config['data_path']}")
-    df = pd.read_csv(config['data_path'])
-    df['content'] = df['title'].fillna('') + " - " + df['text'].fillna('')
+    print(f"Loading dedicated test dataset from: {config['data_path']}")
+    if not os.path.exists(config['data_path']):
+        print(f"Error: Test data file not found at {config['data_path']}")
+        print("Please run the training script first (`make train`) to generate the test set.")
+        return
 
-    # IMPORTANT: Split the data in the exact same way as in the training script
-    # to ensure we are evaluating on the correct, unseen test set.
-    _, test_df = train_test_split(df, test_size=0.2, random_state=42, stratify=df['label'])
+    test_df = pd.read_csv(config['data_path'])
+    test_df['content'] = test_df['title'].fillna('') + " - " + test_df['text'].fillna('')
+
     test_dataset = Dataset.from_pandas(test_df)
-    print(f"Test set prepared with {len(test_dataset)} samples.")
+    print(f"Unseen test set loaded with {len(test_dataset)} samples.")
 
     # 3. Tokenize the Test Data
     def tokenize_function(examples):
@@ -111,7 +113,7 @@ if __name__ == '__main__':
     # --- Configuration Dictionary ---
     config = {
         "model_path": os.path.join(project_root, 'models', 'fake-news-detector', 'final_model'),
-        "data_path": os.path.join(project_root, 'data', 'processed', 'processed_news.csv'),
+        "data_path": os.path.join(project_root, 'data', 'processed', 'test_data.csv'), # <-- FIX: Point to the dedicated test set
         "report_dir": os.path.join(project_root, 'reports')
     }
 
@@ -120,7 +122,7 @@ if __name__ == '__main__':
     parser.add_argument('--model_path', type=str, default=config['model_path'],
                         help='Directory of the saved fine-tuned model and tokenizer.')
     parser.add_argument('--data_path', type=str, default=config['data_path'],
-                        help='Path to the processed news CSV file.')
+                        help='Path to the dedicated test data CSV file (test_data.csv).')
     parser.add_argument('--report_dir', type=str, default=config['report_dir'],
                         help='Directory to save the evaluation reports.')
 

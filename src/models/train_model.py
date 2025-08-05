@@ -59,14 +59,22 @@ def main(config):
     # Combine title and text for a richer input, handling potential NaN values
     df['content'] = df['title'].fillna('') + " - " + df['text'].fillna('')
 
-    # Split the data into training and testing sets
-    train_df, test_df = train_test_split(df, test_size=0.2, random_state=42, stratify=df['label'])
+    # THE FIX: Split data into training (80%), validation (10%), and test (10%) sets.
+    # This prevents the model from being evaluated on the same data used for model selection.
+    train_df, temp_df = train_test_split(df, test_size=0.2, random_state=42, stratify=df['label'])
+    val_df, test_df = train_test_split(temp_df, test_size=0.5, random_state=42, stratify=temp_df['label'])
 
+    # Save the unseen test set for the prediction script
+    test_data_path = os.path.join(os.path.dirname(config['data_path']), 'test_data.csv')
+    print(f"Saving unseen test data to: {test_data_path}")
+    test_df.to_csv(test_data_path, index=False)
+
+    # Convert to Hugging Face Dataset objects
     train_dataset = Dataset.from_pandas(train_df)
-    test_dataset = Dataset.from_pandas(test_df)
+    val_dataset = Dataset.from_pandas(val_df)
 
     print("Dataset loaded and split successfully.")
-    print(f"Training samples: {len(train_dataset)}, Testing samples: {len(test_dataset)}")
+    print(f"Training samples: {len(train_dataset)}, Validation samples: {len(val_dataset)}, Test samples: {len(test_df)}")
 
     # 2. Load Tokenizer
     print(f"Loading tokenizer: {config['model_name']}")
@@ -80,7 +88,7 @@ def main(config):
 
     print("Tokenizing datasets...")
     tokenized_train_dataset = train_dataset.map(tokenize_function, batched=True)
-    tokenized_test_dataset = test_dataset.map(tokenize_function, batched=True)
+    tokenized_val_dataset = val_dataset.map(tokenize_function, batched=True)
     print("Tokenization complete.")
 
     # 4. Load Pre-trained Model
@@ -119,7 +127,7 @@ def main(config):
         model=model,
         args=training_args,
         train_dataset=tokenized_train_dataset,
-        eval_dataset=tokenized_test_dataset,
+        eval_dataset=tokenized_val_dataset,
         compute_metrics=compute_metrics,
         tokenizer=tokenizer,
     )
@@ -129,12 +137,8 @@ def main(config):
     trainer.train()
     print("--- Training complete! ✅ ---")
 
-    # 8. Evaluate the final model
-    print("--- Evaluating final model on the test set ---")
-    eval_results = trainer.evaluate()
-    print(f"Evaluation results: {eval_results}")
-
-    # 9. Save the final model and tokenizer
+    # 8. Save the final model and tokenizer
+    # The final evaluation on the test set is now done in the predict_model.py script.
     final_model_path = os.path.join(config['output_dir'], 'final_model')
     print(f"Saving the fine-tuned model to: {final_model_path}")
     trainer.save_model(final_model_path)
