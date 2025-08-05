@@ -3,8 +3,9 @@
 import os
 import pandas as pd
 import argparse
-from sklearn.utils import shuffle
 
+
+# We have removed the 'from sklearn.utils import shuffle' import to avoid the error.
 
 def load_and_label(file_path, label):
     """
@@ -53,9 +54,12 @@ def main(input_dir, output_dir):
         return
 
     # 3. Combine and shuffle
-    print("Combining and shuffling datasets...")
+    print("Combining and shuffling datasets using pandas...")
     combined_df = pd.concat([df_true, df_fake], ignore_index=True)
-    shuffled_df = shuffle(combined_df, random_state=42).reset_index(drop=True)
+
+    # THE FIX: Use pandas' built-in .sample() method to shuffle the DataFrame.
+    # This achieves the same result as sklearn.utils.shuffle without the dependency.
+    shuffled_df = combined_df.sample(frac=1, random_state=42).reset_index(drop=True)
 
     # 4. Save processed data
     # Ensure the output directory exists
