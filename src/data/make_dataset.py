@@ -3,20 +3,31 @@
 import os
 import pandas as pd
 import argparse
+import re
 
 
-# We have removed the 'from sklearn.utils import shuffle' import to avoid the error.
-
-def load_and_label(file_path, label):
+def clean_text(text):
     """
-    Loads a CSV file and adds a label column.
+    Removes source identifiers like "WASHINGTON (Reuters) - " from the start of a string.
+    """
+    # This regex looks for:
+    # ^\s* - Start of the string with optional whitespace
+    # [A-Z\s]+         - One or more uppercase letters and spaces (for the city name)
+    # \s*\([A-Za-z]+\) - Whitespace, then a source in parentheses (e.g., "(Reuters)")
+    # \s+-\s* - Whitespace, a hyphen, and more whitespace
+    return re.sub(r'^\s*[A-Z\s]+\s*\([A-Za-z]+\)\s+-\s*', '', text)
+
+
+def load_and_process(file_path, label):
+    """
+    Loads a CSV file, adds a label column, and cleans the text data.
 
     Args:
         file_path (str): The path to the CSV file.
         label (int): The label to assign to the data (e.g., 1 for fake, 0 for real).
 
     Returns:
-        pandas.DataFrame: The loaded and labeled DataFrame, or None if the file is not found.
+        pandas.DataFrame: The loaded, cleaned, and labeled DataFrame, or None if the file is not found.
     """
     if not os.path.exists(file_path):
         print(f"Error: File not found at {file_path}")
@@ -24,13 +35,20 @@ def load_and_label(file_path, label):
 
     df = pd.read_csv(file_path)
     df['label'] = label
+
+    # Clean the 'text' column if it's the 'True' news file
+    if label == 0:
+        print(f"Cleaning source identifiers from {os.path.basename(file_path)}...")
+        # Ensure 'text' column is of string type to avoid errors with .apply
+        df['text'] = df['text'].astype(str).apply(clean_text)
+
     return df
 
 
 def main(input_dir, output_dir):
     """
     Main function to execute the data processing pipeline.
-    Loads raw data, combines it, shuffles it, and saves the processed file.
+    Loads raw data, cleans it, combines it, shuffles it, and saves the processed file.
 
     Args:
         input_dir (str): Directory containing the raw data files ('True.csv', 'Fake.csv').
@@ -42,29 +60,24 @@ def main(input_dir, output_dir):
     true_file_path = os.path.join(input_dir, 'True.csv')
     fake_file_path = os.path.join(input_dir, 'Fake.csv')
 
-    # 2. Load and label data
-    print(f"Loading real news from: {true_file_path}")
-    df_true = load_and_label(true_file_path, 0)  # 0 for real news
+    # 2. Load, clean, and label data
+    print(f"Loading and processing real news from: {true_file_path}")
+    df_true = load_and_process(true_file_path, 0)  # 0 for real news
 
-    print(f"Loading fake news from: {fake_file_path}")
-    df_fake = load_and_label(fake_file_path, 1)  # 1 for fake news
+    print(f"Loading and processing fake news from: {fake_file_path}")
+    df_fake = load_and_process(fake_file_path, 1)  # 1 for fake news
 
     if df_true is None or df_fake is None:
         print("Halting execution due to missing file(s).")
         return
 
     # 3. Combine and shuffle
-    print("Combining and shuffling datasets using pandas...")
+    print("Combining and shuffling datasets...")
     combined_df = pd.concat([df_true, df_fake], ignore_index=True)
-
-    # THE FIX: Use pandas' built-in .sample() method to shuffle the DataFrame.
-    # This achieves the same result as sklearn.utils.shuffle without the dependency.
     shuffled_df = combined_df.sample(frac=1, random_state=42).reset_index(drop=True)
 
     # 4. Save processed data
-    # Ensure the output directory exists
     os.makedirs(output_dir, exist_ok=True)
-
     output_filepath = os.path.join(output_dir, 'processed_news.csv')
     print(f"Saving processed data to: {output_filepath}")
     shuffled_df.to_csv(output_filepath, index=False)
@@ -73,18 +86,10 @@ def main(input_dir, output_dir):
 
 
 if __name__ == '__main__':
-    # This block allows the script to be run from the command line.
     parser = argparse.ArgumentParser(description="Process raw news data into a single labeled CSV file.")
-
-    # Make paths relative to the project root, not the current working directory.
-    # This makes the script runnable from anywhere.
-
-    # Get the directory of the current script.
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    # Go up two levels to get the project root (from src/data -> src -> root).
     project_root = os.path.dirname(os.path.dirname(script_dir))
 
-    # Define default paths relative to the calculated project root.
     default_input_path = os.path.join(project_root, 'data', 'raw')
     default_output_path = os.path.join(project_root, 'data', 'processed')
 
@@ -102,6 +107,4 @@ if __name__ == '__main__':
     )
 
     args = parser.parse_args()
-
-    # Run the main function with the provided arguments
     main(args.input_dir, args.output_dir)
