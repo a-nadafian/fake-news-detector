@@ -90,3 +90,7 @@ target/
 
 # model files
 /models/
+
+.nltk_data/
+classification_report.txt
+confusion_matrix.png

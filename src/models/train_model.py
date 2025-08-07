@@ -5,7 +5,7 @@ import argparse
 import torch
 import numpy as np
 import pandas as pd
-from datasets import load_dataset, Dataset
+from datasets import load_dataset, Dataset, DatasetDict
 from transformers import (
     AutoTokenizer,
     AutoModelForSequenceClassification,
@@ -14,18 +14,17 @@ from transformers import (
     logging as hf_logging
 )
 from sklearn.metrics import accuracy_score, f1_score
-from sklearn.model_selection import train_test_split
 
-# Set verbosity for the transformers library
+# Set verbosity for the transformers library to provide informative logs.
 hf_logging.set_verbosity_info()
 
 
 def compute_metrics(p):
     """
-    Computes accuracy and F1 score for evaluation.
+    Computes accuracy and F1 score for evaluation during training.
 
     Args:
-        p (EvalPrediction): A tuple containing predictions and labels.
+        p (EvalPrediction): A tuple containing model predictions and true labels.
 
     Returns:
         dict: A dictionary with 'accuracy' and 'f1' scores.
@@ -40,41 +39,43 @@ def compute_metrics(p):
 def main(config):
     """
     Main function to execute the model training pipeline.
+    This function now loads the pre-split train and validation sets.
 
     Args:
         config (dict): A dictionary containing configuration parameters.
     """
     print("--- Starting model training pipeline ---")
 
-    # 1. Load Processed Dataset
-    print(f"Loading processed dataset from: {config['data_path']}")
-    if not os.path.exists(config['data_path']):
-        print(f"Error: Data file not found at {config['data_path']}")
-        print("Please run the data processing script first (`make data`).")
+    # 1. Load Pre-split Datasets
+    processed_data_dir = os.path.dirname(config['train_data_path'])
+    print(f"Loading pre-split datasets from: {processed_data_dir}")
+
+    if not os.path.exists(config['train_data_path']) or not os.path.exists(config['val_data_path']):
+        print("Error: train.csv or val.csv not found.")
+        print("Please run the data processing script first (`make data` or `python src/data/make_dataset.py`).")
         return
 
-    # Load data with pandas and then convert to a Hugging Face Dataset object
-    df = pd.read_csv(config['data_path'])
+    # Load the datasets using the Hugging Face datasets library
+    train_dataset = Dataset.from_csv(config['train_data_path'])
+    val_dataset = Dataset.from_csv(config['val_data_path'])
 
-    # Combine title and text for a richer input, handling potential NaN values
-    df['content'] = df['title'].fillna('') + " - " + df['text'].fillna('')
+    # --- FIX 1: Ensure all 'text' entries are strings to prevent tokenizer errors ---
+    # This handles any potential null/NaN values loaded from the CSV.
+    def sanitize_text(example):
+        example['text'] = '' if example['text'] is None else str(example['text'])
+        return example
 
-    # THE FIX: Split data into training (80%), validation (10%), and test (10%) sets.
-    # This prevents the model from being evaluated on the same data used for model selection.
-    train_df, temp_df = train_test_split(df, test_size=0.2, random_state=42, stratify=df['label'])
-    val_df, test_df = train_test_split(temp_df, test_size=0.5, random_state=42, stratify=temp_df['label'])
+    train_dataset = train_dataset.map(sanitize_text)
+    val_dataset = val_dataset.map(sanitize_text)
 
-    # Save the unseen test set for the prediction script
-    test_data_path = os.path.join(os.path.dirname(config['data_path']), 'test_data.csv')
-    print(f"Saving unseen test data to: {test_data_path}")
-    test_df.to_csv(test_data_path, index=False)
 
-    # Convert to Hugging Face Dataset objects
-    train_dataset = Dataset.from_pandas(train_df)
-    val_dataset = Dataset.from_pandas(val_df)
-
-    print("Dataset loaded and split successfully.")
-    print(f"Training samples: {len(train_dataset)}, Validation samples: {len(val_dataset)}, Test samples: {len(test_df)}")
+    # Combine them into a DatasetDict for the Trainer
+    datasets = DatasetDict({
+        'train': train_dataset,
+        'validation': val_dataset
+    })
+    print("Datasets loaded and sanitized successfully.")
+    print(f"Training samples: {len(datasets['train'])}, Validation samples: {len(datasets['validation'])}")
 
     # 2. Load Tokenizer
     print(f"Loading tokenizer: {config['model_name']}")
@@ -82,13 +83,12 @@ def main(config):
 
     # 3. Tokenize Data
     def tokenize_function(examples):
-        """Tokenizes the 'content' column of the dataset."""
-        return tokenizer(examples['content'], padding='max_length', truncation=True,
+        """Tokenizes the 'text' column of the dataset."""
+        return tokenizer(examples['text'], padding='max_length', truncation=True,
                          max_length=config['max_token_length'])
 
     print("Tokenizing datasets...")
-    tokenized_train_dataset = train_dataset.map(tokenize_function, batched=True)
-    tokenized_val_dataset = val_dataset.map(tokenize_function, batched=True)
+    tokenized_datasets = datasets.map(tokenize_function, batched=True)
     print("Tokenization complete.")
 
     # 4. Load Pre-trained Model
@@ -102,9 +102,7 @@ def main(config):
 
     # 5. Define Training Arguments
     print("Setting up training arguments...")
-
-    # We enable evaluation and saving at the end of each epoch.
-    # The best model according to the 'f1' score will be loaded at the end of training.
+    # --- FIX 2: Use `evaluation_strategy` instead of the outdated `eval_strategy` ---
     training_args = TrainingArguments(
         output_dir=config['output_dir'],
         num_train_epochs=config['num_epochs'],
@@ -119,15 +117,15 @@ def main(config):
         load_best_model_at_end=True,
         metric_for_best_model="f1",
         greater_is_better=True,
-        report_to="none"  # Disable reporting to any external service
+        report_to="none"
     )
 
     # 6. Instantiate Trainer
     trainer = Trainer(
         model=model,
         args=training_args,
-        train_dataset=tokenized_train_dataset,
-        eval_dataset=tokenized_val_dataset,
+        train_dataset=tokenized_datasets['train'],
+        eval_dataset=tokenized_datasets['validation'],
         compute_metrics=compute_metrics,
         tokenizer=tokenizer,
     )
@@ -138,52 +136,38 @@ def main(config):
     print("--- Training complete! ✅ ---")
 
     # 8. Save the final model and tokenizer
-    # The final evaluation on the test set is now done in the predict_model.py script.
     final_model_path = os.path.join(config['output_dir'], 'final_model')
-    print(f"Saving the fine-tuned model to: {final_model_path}")
+    print(f"Saving the best fine-tuned model to: {final_model_path}")
     trainer.save_model(final_model_path)
     tokenizer.save_pretrained(final_model_path)
     print("Model saved successfully.")
 
 
 if __name__ == '__main__':
-    # Get the directory of the current script.
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    # Go up two levels to get the project root (from src/models -> src -> root).
     project_root = os.path.dirname(os.path.dirname(script_dir))
 
-    # --- Configuration Dictionary ---
-    # Centralizes all settings for easy access and modification.
     config = {
-        "model_name": "distilbert-base-uncased",  # A lighter version of BERT, good for faster training
-        "data_path": os.path.join(project_root, 'data', 'processed', 'processed_news.csv'),
+        "model_name": "distilbert-base-uncased",
+        "train_data_path": os.path.join(project_root, 'data', 'processed', 'train.csv'),
+        "val_data_path": os.path.join(project_root, 'data', 'processed', 'val.csv'),
         "output_dir": os.path.join(project_root, 'models', 'fake-news-detector'),
         "num_labels": 2,
-        "num_epochs": 3,  # Increased epochs for better training
-        "batch_size": 16,  # Adjust based on your GPU memory
-        "max_token_length": 512  # Max length for BERT-like models
+        "num_epochs": 3,
+        "batch_size": 16,
+        "max_token_length": 512
     }
 
-    # This block allows the script to be run from the command line,
-    # potentially overriding values from the config dictionary.
     parser = argparse.ArgumentParser(description="Train a transformer model for fake news classification.")
-
-    parser.add_argument('--model_name', type=str, default=config['model_name'],
-                        help='Name of the pre-trained model from Hugging Face Hub.')
-    parser.add_argument('--data_path', type=str, default=config['data_path'],
-                        help='Path to the processed news CSV file.')
-    parser.add_argument('--output_dir', type=str, default=config['output_dir'],
-                        help='Directory to save the trained model.')
-    parser.add_argument('--num_epochs', type=int, default=config['num_epochs'], help='Number of training epochs.')
-    parser.add_argument('--batch_size', type=int, default=config['batch_size'],
-                        help='Training and evaluation batch size.')
-    parser.add_argument('--max_token_length', type=int, default=config['max_token_length'],
-                        help='Maximum token length for the tokenizer.')
+    parser.add_argument('--model_name', type=str, default=config['model_name'])
+    parser.add_argument('--train_data_path', type=str, default=config['train_data_path'])
+    parser.add_argument('--val_data_path', type=str, default=config['val_data_path'])
+    parser.add_argument('--output_dir', type=str, default=config['output_dir'])
+    parser.add_argument('--num_epochs', type=int, default=config['num_epochs'])
+    parser.add_argument('--batch_size', type=int, default=config['batch_size'])
+    parser.add_argument('--max_token_length', type=int, default=config['max_token_length'])
 
     args = parser.parse_args()
-
-    # Update config with any command-line arguments
     config.update(vars(args))
 
-    # Run the main function with the final configuration
     main(config)

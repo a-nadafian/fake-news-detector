@@ -12,15 +12,14 @@ from transformers import (
     AutoTokenizer,
     AutoModelForSequenceClassification,
     Trainer,
-    TrainingArguments  # <-- Import TrainingArguments
+    TrainingArguments
 )
 from sklearn.metrics import classification_report, confusion_matrix
-from sklearn.model_selection import train_test_split
 
 
 def main(config):
     """
-    Main function to evaluate the fine-tuned model.
+    Main function to evaluate the fine-tuned model on the unseen test set.
 
     Args:
         config (dict): A dictionary containing configuration parameters.
@@ -31,7 +30,7 @@ def main(config):
     print(f"Loading model and tokenizer from: {config['model_path']}")
     if not os.path.exists(config['model_path']):
         print(f"Error: Model not found at {config['model_path']}")
-        print("Please run the training script first (`make train`).")
+        print("Please run the training script first (`make train` or `python src/models/train_model.py`).")
         return
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -43,30 +42,33 @@ def main(config):
     print(f"Loading dedicated test dataset from: {config['data_path']}")
     if not os.path.exists(config['data_path']):
         print(f"Error: Test data file not found at {config['data_path']}")
-        print("Please run the training script first (`make train`) to generate the test set.")
+        print(
+            "Please run the data processing script first (`make data` or `python src/data/make_dataset.py`) to generate the test set.")
         return
 
     test_df = pd.read_csv(config['data_path'])
-    test_df['content'] = test_df['title'].fillna('') + " - " + test_df['text'].fillna('')
-
     test_dataset = Dataset.from_pandas(test_df)
-    print(f"Unseen test set loaded with {len(test_dataset)} samples.")
+
+    # --- FIX: Ensure all 'text' entries are strings to prevent tokenizer errors ---
+    # This handles any potential null/NaN values loaded from the CSV.
+    def sanitize_text(example):
+        example['text'] = '' if example['text'] is None else str(example['text'])
+        return example
+
+    test_dataset = test_dataset.map(sanitize_text)
+    print(f"Unseen test set loaded and sanitized with {len(test_dataset)} samples.")
 
     # 3. Tokenize the Test Data
     def tokenize_function(examples):
-        return tokenizer(examples['content'], padding='max_length', truncation=True, max_length=512)
+        return tokenizer(examples['text'], padding='max_length', truncation=True, max_length=512)
 
     print("Tokenizing test data...")
     tokenized_test_dataset = test_dataset.map(tokenize_function, batched=True)
 
     # 4. Generate Predictions
     print("Generating predictions...")
-
-    # --- FIX ---
-    # The Trainer object automatically tries to connect to services like wandb.
-    # To prevent this, we must pass it TrainingArguments with reporting disabled.
     eval_args = TrainingArguments(
-        output_dir=os.path.join(config['report_dir'], 'eval_temp'),  # A temporary output dir is required
+        output_dir=os.path.join(config['report_dir'], 'eval_temp'),
         report_to="none",
     )
 
@@ -77,8 +79,6 @@ def main(config):
 
     # 5. Calculate Metrics and Generate Reports
     print("Calculating metrics and generating reports...")
-
-    # Ensure the reports directory exists
     os.makedirs(config['report_dir'], exist_ok=True)
 
     # a) Classification Report
@@ -96,7 +96,7 @@ def main(config):
                 xticklabels=['Real', 'Fake'], yticklabels=['Real', 'Fake'])
     plt.xlabel('Predicted Label')
     plt.ylabel('True Label')
-    plt.title('Confusion Matrix')
+    plt.title('Confusion Matrix on Unseen Test Data')
 
     cm_path = os.path.join(config['report_dir'], 'confusion_matrix.png')
     plt.savefig(cm_path)
@@ -106,25 +106,19 @@ def main(config):
 
 
 if __name__ == '__main__':
-    # Get the project root directory
     script_dir = os.path.dirname(os.path.abspath(__file__))
     project_root = os.path.dirname(os.path.dirname(script_dir))
 
-    # --- Configuration Dictionary ---
     config = {
         "model_path": os.path.join(project_root, 'models', 'fake-news-detector', 'final_model'),
-        "data_path": os.path.join(project_root, 'data', 'processed', 'test_data.csv'), # <-- FIX: Point to the dedicated test set
+        "data_path": os.path.join(project_root, 'data', 'processed', 'test.csv'),
         "report_dir": os.path.join(project_root, 'reports')
     }
 
     parser = argparse.ArgumentParser(description="Evaluate the fine-tuned fake news classification model.")
-
-    parser.add_argument('--model_path', type=str, default=config['model_path'],
-                        help='Directory of the saved fine-tuned model and tokenizer.')
-    parser.add_argument('--data_path', type=str, default=config['data_path'],
-                        help='Path to the dedicated test data CSV file (test_data.csv).')
-    parser.add_argument('--report_dir', type=str, default=config['report_dir'],
-                        help='Directory to save the evaluation reports.')
+    parser.add_argument('--model_path', type=str, default=config['model_path'])
+    parser.add_argument('--data_path', type=str, default=config['data_path'])
+    parser.add_argument('--report_dir', type=str, default=config['report_dir'])
 
     args = parser.parse_args()
     config.update(vars(args))
