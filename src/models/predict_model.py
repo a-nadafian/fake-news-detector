@@ -15,6 +15,55 @@ from transformers import (
     TrainingArguments
 )
 from sklearn.metrics import classification_report, confusion_matrix
+from src.features.build_features import preprocess_text
+
+
+def predict_sentence(text, model, tokenizer, device="cpu"):
+    """
+    Predict whether a given text is fake or real news.
+    
+    Args:
+        text (str): Raw text input to classify
+        model: Loaded transformer model
+        tokenizer: Loaded tokenizer
+        device (str): Device to run inference on ('cpu' or 'cuda')
+        
+    Returns:
+        dict: Prediction results with label and confidence
+    """
+    # Preprocess the text using the same pipeline as training
+    preprocessed_text = preprocess_text(text)
+    
+    # Tokenize the preprocessed text
+    inputs = tokenizer(
+        preprocessed_text,
+        padding='max_length',
+        truncation=True,
+        max_length=512,
+        return_tensors='pt'
+    ).to(device)
+    
+    # Get model prediction
+    with torch.no_grad():
+        outputs = model(**inputs)
+        probabilities = torch.softmax(outputs.logits, dim=1)
+        predicted_class = torch.argmax(probabilities, dim=1).item()
+        confidence = probabilities[0][predicted_class].item()
+    
+    # Map prediction to label
+    label_map = {0: "Real", 1: "Fake"}
+    predicted_label = label_map[predicted_class]
+    
+    return {
+        "text": text,
+        "preprocessed_text": preprocessed_text,
+        "prediction": predicted_label,
+        "confidence": confidence,
+        "probabilities": {
+            "Real": probabilities[0][0].item(),
+            "Fake": probabilities[0][1].item()
+        }
+    }
 
 
 def main(config):
@@ -103,6 +152,30 @@ def main(config):
     print(f"Confusion matrix visualization saved to: {cm_path}")
 
     print("\n--- Evaluation complete! ✅ ---")
+    
+    # Demonstrate the new predict_sentence function
+    print("\n--- Testing predict_sentence function ---")
+    
+    # Sample fake news text for testing
+    sample_fake_news = "BREAKING: Scientists discover that drinking hot water with lemon cures all diseases instantly! This revolutionary treatment has been hidden by big pharma for decades."
+    
+    # Sample real news text for testing
+    sample_real_news = "The World Health Organization released new guidelines for COVID-19 prevention measures based on recent scientific studies."
+    
+    # Test predictions
+    print(f"\nTesting fake news sample:")
+    fake_result = predict_sentence(sample_fake_news, model, tokenizer, device)
+    print(f"Original text: {fake_result['text']}")
+    print(f"Preprocessed: {fake_result['preprocessed_text']}")
+    print(f"Prediction: {fake_result['prediction']} (Confidence: {fake_result['confidence']:.3f})")
+    print(f"Probabilities - Real: {fake_result['probabilities']['Real']:.3f}, Fake: {fake_result['probabilities']['Fake']:.3f}")
+    
+    print(f"\nTesting real news sample:")
+    real_result = predict_sentence(sample_real_news, model, tokenizer, device)
+    print(f"Original text: {real_result['text']}")
+    print(f"Preprocessed: {real_result['preprocessed_text']}")
+    print(f"Prediction: {real_result['prediction']} (Confidence: {real_result['confidence']:.3f})")
+    print(f"Probabilities - Real: {real_result['probabilities']['Real']:.3f}, Fake: {real_result['probabilities']['Fake']:.3f}")
 
 
 if __name__ == '__main__':
