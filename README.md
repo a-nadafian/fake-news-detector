@@ -377,14 +377,6 @@ streamlit run app.py
 3. Connect your repository
 4. Deploy with main file: `app.py`
 
-### Docker
-
-```bash
-docker build -t fake-news-detector .
-docker run -p 8501:8501 fake-news-detector
-```
-
-For detailed deployment instructions, see [DEPLOYMENT.md](DEPLOYMENT.md).
 
 ## 🔍 Troubleshooting
 
@@ -445,12 +437,6 @@ To use your own dataset:
 4. **Test thoroughly**
 5. **Submit a pull request**
 
-### Development Guidelines
-
-- Follow PEP 8 style guidelines
-- Add docstrings to new functions
-- Include tests for new features
-- Update documentation
 
 ## 📄 License
 
@@ -463,26 +449,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - **ISOT Dataset**: For the training data
 - **BERT**: For the base model architecture
 
-## 📞 Support
-
-If you encounter issues:
-
-1. **Check the troubleshooting section** above
-2. **Review the code comments** for guidance
-3. **Open an issue** on GitHub with:
-   - Error message
-   - Steps to reproduce
-   - System information
-
-## 🔗 Links
-
-- **Live Demo**: [Your Streamlit App URL]
-- **Dataset**: [ISOT Fake News Dataset]
-- **Paper**: [BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding]
-- **Documentation**: [DEPLOYMENT.md](DEPLOYMENT.md)
-
 ---
 
 ⭐ **Star this repository if you find it helpful!**
 
-Made with ❤️ using Streamlit and Transformers

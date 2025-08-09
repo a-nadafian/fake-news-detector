@@ -142,10 +142,11 @@ def predict_news(text, model, tokenizer, device):
         probabilities = torch.softmax(outputs.logits, dim=1)
         predicted_class = torch.argmax(probabilities, dim=1).item()
         confidence = probabilities[0][predicted_class].item()
-    
-    # Map prediction to label
-    label_map = {0: "Real", 1: "Fake"}
-    predicted_label = label_map[predicted_class]
+
+    # Map prediction to label using model config (0: Fake, 1: Real)
+    id2label = getattr(model.config, 'id2label', {0: 'Fake', 1: 'Real'})
+    label2id = getattr(model.config, 'label2id', {'Fake': 0, 'Real': 1})
+    predicted_label = id2label.get(predicted_class, str(predicted_class))
     
     return {
         "text": text,
@@ -153,8 +154,8 @@ def predict_news(text, model, tokenizer, device):
         "prediction": predicted_label,
         "confidence": confidence,
         "probabilities": {
-            "Real": probabilities[0][0].item(),
-            "Fake": probabilities[0][1].item()
+            "Fake": probabilities[0][label2id['Fake']].item(),
+            "Real": probabilities[0][label2id['Real']].item()
         }
     }
 

@@ -49,10 +49,11 @@ def predict_sentence(text, model, tokenizer, device="cpu"):
         probabilities = torch.softmax(outputs.logits, dim=1)
         predicted_class = torch.argmax(probabilities, dim=1).item()
         confidence = probabilities[0][predicted_class].item()
-    
-    # Map prediction to label
-    label_map = {0: "Real", 1: "Fake"}
-    predicted_label = label_map[predicted_class]
+
+    # Map prediction to label using model config (0: Fake, 1: Real)
+    id2label = getattr(model.config, 'id2label', {0: 'Fake', 1: 'Real'})
+    label2id = getattr(model.config, 'label2id', {'Fake': 0, 'Real': 1})
+    predicted_label = id2label.get(predicted_class, str(predicted_class))
     
     return {
         "text": text,
@@ -60,8 +61,8 @@ def predict_sentence(text, model, tokenizer, device="cpu"):
         "prediction": predicted_label,
         "confidence": confidence,
         "probabilities": {
-            "Real": probabilities[0][0].item(),
-            "Fake": probabilities[0][1].item()
+            "Fake": probabilities[0][label2id['Fake']].item(),
+            "Real": probabilities[0][label2id['Real']].item()
         }
     }
 
@@ -131,7 +132,7 @@ def main(config):
     os.makedirs(config['report_dir'], exist_ok=True)
 
     # a) Classification Report
-    report = classification_report(true_labels, predicted_labels, target_names=['Real (0)', 'Fake (1)'])
+    report = classification_report(true_labels, predicted_labels, target_names=['Fake (0)', 'Real (1)'])
     report_path = os.path.join(config['report_dir'], 'classification_report.txt')
     with open(report_path, 'w') as f:
         f.write(report)
@@ -142,7 +143,7 @@ def main(config):
     cm = confusion_matrix(true_labels, predicted_labels)
     plt.figure(figsize=(8, 6))
     sns.heatmap(cm, annot=True, fmt='d', cmap='Blues',
-                xticklabels=['Real', 'Fake'], yticklabels=['Real', 'Fake'])
+                xticklabels=['Fake', 'Real'], yticklabels=['Fake', 'Real'])
     plt.xlabel('Predicted Label')
     plt.ylabel('True Label')
     plt.title('Confusion Matrix on Unseen Test Data')

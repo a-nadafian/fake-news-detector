@@ -148,7 +148,9 @@ def main(config):
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model = AutoModelForSequenceClassification.from_pretrained(
         config['model_name'],
-        num_labels=config['num_labels']
+        num_labels=config['num_labels'],
+        id2label={0: "Fake", 1: "Real"},
+        label2id={"Fake": 0, "Real": 1}
     ).to(device)
     print(f"Model loaded on device: {device}")
 
@@ -199,7 +201,7 @@ def main(config):
     val_true = val_predictions.label_ids
     
     # Create detailed classification report
-    report = classification_report(val_true, val_preds, target_names=['Real', 'Fake'])
+    report = classification_report(val_true, val_preds, target_names=['Fake', 'Real'])
     print("\n--- Detailed Classification Report ---")
     print(report)
     
@@ -214,7 +216,7 @@ def main(config):
     cm = confusion_matrix(val_true, val_preds)
     plt.figure(figsize=(8, 6))
     sns.heatmap(cm, annot=True, fmt='d', cmap='Blues',
-                xticklabels=['Real', 'Fake'], yticklabels=['Real', 'Fake'])
+                xticklabels=['Fake', 'Real'], yticklabels=['Fake', 'Real'])
     plt.xlabel('Predicted Label')
     plt.ylabel('True Label')
     plt.title('Confusion Matrix - Training Validation')
@@ -237,18 +239,27 @@ def main(config):
         "The World Health Organization released new guidelines for COVID-19 prevention measures."
     ]
     
+    # Ensure model is in eval mode and inputs are on the same device as the model
+    model.eval()
     for i, sample in enumerate(test_samples):
-        inputs = tokenizer(sample, padding='max_length', truncation=True, 
-                          max_length=config['max_token_length'], return_tensors='pt')
+        inputs = tokenizer(
+            sample,
+            padding='max_length',
+            truncation=True,
+            max_length=config['max_token_length'],
+            return_tensors='pt'
+        )
+        # Move tokenized tensors to the model's device to avoid CPU/CUDA mismatch
+        inputs = {key: tensor.to(model.device) for key, tensor in inputs.items()}
         with torch.no_grad():
             outputs = model(**inputs)
             probabilities = torch.softmax(outputs.logits, dim=1)
             predicted_class = torch.argmax(probabilities, dim=1).item()
             confidence = probabilities[0][predicted_class].item()
         
-        label_map = {0: "Real", 1: "Fake"}
+        predicted_label = model.config.id2label.get(predicted_class, str(predicted_class))
         print(f"Sample {i+1}: {sample[:50]}...")
-        print(f"  Prediction: {label_map[predicted_class]} (Confidence: {confidence:.3f})")
+        print(f"  Prediction: {predicted_label} (Confidence: {confidence:.3f})")
         print()
 
 
