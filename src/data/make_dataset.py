@@ -13,12 +13,12 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 
 def main(input_dir, output_dir):
     """
-    Main function to execute the data processing pipeline for the WELFake dataset.
+    Main function to execute the data processing pipeline for the final_training_corpus.csv.
     """
-    logging.info("--- Starting data processing pipeline for WELFake dataset ---")
+    logging.info("--- Starting data processing pipeline for final_training_corpus.csv ---")
 
     # 1. Define file paths
-    input_filepath = os.path.join(input_dir, 'WELFake_Dataset.csv')
+    input_filepath = os.path.join(input_dir, 'final_training_corpus.csv')
     if not os.path.exists(input_filepath):
         logging.error(f"Input file not found at: {input_filepath}")
         return
@@ -26,14 +26,21 @@ def main(input_dir, output_dir):
     # 2. Load Data
     logging.info(f"Loading raw data from: {input_filepath}")
     df = pd.read_csv(input_filepath)
+    logging.info(f"Columns found in the dataset: {df.columns.tolist()}")
 
     # 3. Initial Cleaning & Feature Engineering
     logging.info("Performing initial cleaning and feature engineering...")
     if 'Unnamed: 0' in df.columns:
         df = df.drop('Unnamed: 0', axis=1)
-    df['title'] = df['title'].fillna('')
+
+    # --- Check for 'text' column ---
+    if 'text' not in df.columns:
+        logging.error("Column 'text' not found in the dataframe. Please check your CSV file.")
+        return
+
     df['text'] = df['text'].fillna('')
-    df['content'] = df['title'] + " " + df['text']
+    # The 'content' is now just the 'text' since there is no 'title'
+    df['content'] = df['text']
     logging.info("Dataset labels: 0 = Fake, 1 = Real")
 
     # 4. Apply Advanced Text Cleaning
@@ -69,15 +76,15 @@ if __name__ == '__main__':
     # Define project root
     script_dir = os.path.dirname(os.path.abspath(__file__))
     project_root = os.path.dirname(os.path.dirname(script_dir))
-    
+
     parser = argparse.ArgumentParser(
-        description="Process the WELFake news dataset into training, validation, and test sets.")
+        description="Process the news dataset into training, validation, and test sets.")
 
     default_input_path = os.path.join(project_root, 'data', 'raw')
     default_output_path = os.path.join(project_root, 'data', 'processed')
 
     parser.add_argument('--input_dir', type=str, default=default_input_path,
-                        help="Directory where the raw 'WELFake_Dataset.csv' file is located.")
+                        help="Directory where the raw 'final_training_corpus.csv' file is located.")
     parser.add_argument('--output_dir', type=str, default=default_output_path,
                         help="Directory where the final 'train.csv', 'val.csv', and 'test.csv' files will be saved.")
 
