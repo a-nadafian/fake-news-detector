@@ -8,19 +8,16 @@ import pandas as pd
 from transformers import AutoTokenizer
 import torch.nn.functional as F
 import json
-import mlflow
 import warnings
 
-# Import the necessary classes from your other scripts
-# This requires your src directory to be in the Python path
+# Add the 'src' directory to the Python path to allow for package-like imports
 import sys
 
-# Add the 'src' directory to the Python path to allow for package-like imports
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.append(os.path.join(PROJECT_ROOT, 'src'))
 
-from data.advanced_preprocessing import EnhancedFakeNewsPreprocessor
-from models.train_model import HybridFakeNewsClassifier
+from src.data.advanced_preprocessing import EnhancedFakeNewsPreprocessor
+from src.models.train_model import HybridFakeNewsClassifier
 
 warnings.filterwarnings('ignore')
 
@@ -30,28 +27,31 @@ class Predictor:
     A class to load a trained model and make predictions on new text.
     """
 
-    def __init__(self, model_uri):
+    def __init__(self, model_path):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-        # Load model configuration
-        config_path = os.path.join(model_uri.replace("runs:", "/mlruns/0").replace("/best_model", ""),
-                                   "artifacts/best_model/data/model_config.json")
-
-        # A fallback for older MLflow versions
-        if not os.path.exists(config_path):
-            config_path = os.path.join(model_uri.replace("runs:", "mlruns/0").replace("/best_model", ""),
-                                       "artifacts/model/data/model_config.json")
-
+        # Load model configuration from the specified path
+        config_path = os.path.join(model_path, 'model_config.json')
         with open(config_path, 'r') as f:
             self.config = json.load(f)
 
-        # Load the model from MLflow
-        self.model = mlflow.pytorch.load_model(model_uri)
+        # Initialize the model architecture using the saved configuration
+        self.model = HybridFakeNewsClassifier(
+            bert_model_name=self.config['model_name'],
+            num_labels=self.config['num_labels'],
+            num_engineered_features=len(self.config['feature_columns']),
+            feature_hidden_size=self.config['feature_hidden_size'],
+            dropout=self.config['dropout']
+        )
+
+        # Load the trained weights
+        model_weights_path = os.path.join(model_path, 'model.pth')
+        self.model.load_state_dict(torch.load(model_weights_path, map_location=self.device))
         self.model.to(self.device)
         self.model.eval()
 
         # Load the tokenizer
-        self.tokenizer = AutoTokenizer.from_pretrained(self.config['bert_model_name'])
+        self.tokenizer = AutoTokenizer.from_pretrained(model_path)
 
         # Initialize the preprocessor used during training
         self.preprocessor = EnhancedFakeNewsPreprocessor()
@@ -68,14 +68,11 @@ class Predictor:
         features_dict = self.preprocessor.extract_advanced_features(cleaned_text)
 
         # Ensure the order of features matches the training configuration
-        engineered_features = [features_dict[col.replace('feature_', '')] for col in self.config['feature_columns'] if
-                               col.startswith('feature_')]
-
-        # Note: TF-IDF features cannot be generated for a single text instance in the same way.
-        # For prediction, we will pass zeros for the TF-IDF part. The model's primary strength
-        # will come from the text content (BERT) and the other engineered features.
-        num_tfidf_features = len([col for col in self.config['feature_columns'] if col.startswith('tfidf_')])
-        engineered_features.extend([0.0] * num_tfidf_features)
+        engineered_features = []
+        for col in self.config['feature_columns']:
+            # Handle feature names that might have been changed slightly (e.g. 'feature_char_count' -> 'char_count')
+            feature_key = col.replace('feature_', '')
+            engineered_features.append(features_dict.get(feature_key, 0.0))
 
         features_tensor = torch.tensor([engineered_features], dtype=torch.float32).to(self.device)
         print(f"Step 2: Generated {len(engineered_features)} features.")
@@ -117,30 +114,14 @@ def main(args):
     """
     Main function to drive the prediction process.
     """
-    if args.model_uri:
-        model_uri = args.model_uri
-    else:
-        # Find the best run from MLflow automatically
-        print("--- No model URI provided. Finding the best model from MLflow... ---")
-        client = mlflow.tracking.MlflowClient()
-        try:
-            experiment = client.get_experiment_by_name("Default")
-            if not experiment:
-                print("Error: Could not find the 'Default' MLflow experiment.")
-                return
+    model_path = os.path.join(PROJECT_ROOT, 'models', 'final_model')
 
-            best_run = client.search_runs(
-                experiment_ids=[experiment.experiment_id],
-                order_by=["metrics.val_f1 DESC"],
-                max_results=1
-            )[0]
-            model_uri = f"runs:/{best_run.info.run_id}/best_model"
-            print(f"✅ Found best model from run ID: {best_run.info.run_id}")
-        except (IndexError, mlflow.exceptions.RestException):
-            print("Error: No runs found in MLflow. Please train a model first using 'train_model.py'.")
-            return
+    if not os.path.exists(model_path):
+        print(f"Error: Model not found at {model_path}")
+        print("Please train a model first by running 'src/models/train_model.py'.")
+        return
 
-    predictor = Predictor(model_uri)
+    predictor = Predictor(model_path)
 
     if args.text:
         label, confidence = predictor.predict(args.text)
@@ -166,11 +147,9 @@ def main(args):
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description="Make predictions with a trained fake news detector.")
+    parser = argparse.ArgumentParser(description="Make predictions with the final fake news detector.")
     parser.add_argument('--text', type=str, help="A single string of text to classify.")
     parser.add_argument('--csv_file', type=str, help="Path to a CSV file with a 'text' column to classify.")
-    parser.add_argument('--model_uri', type=str,
-                        help="Optional: MLflow URI of a specific model to use (e.g., 'runs:/<run_id>/best_model').")
 
     args = parser.parse_args()
 
@@ -183,4 +162,3 @@ if __name__ == '__main__':
         print('python src/models/predict_model.py --csv_file "path/to/your/file.csv"')
     else:
         main(args)
-
