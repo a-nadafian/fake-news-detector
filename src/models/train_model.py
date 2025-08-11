@@ -149,7 +149,7 @@ def main():
         "num_labels": 2,
         "train_data_path": os.path.join(PROJECT_ROOT, 'data', 'processed', 'train.csv'),
         "val_data_path": os.path.join(PROJECT_ROOT, 'data', 'processed', 'val.csv'),
-        "output_dir": os.path.join(PROJECT_ROOT, 'models', 'final_model')
+        "output_dir": os.path.join(PROJECT_ROOT, 'models', 'fake_news_detector', 'final_model')
     }
 
     print("--- Starting Final Model Training ---")
