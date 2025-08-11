@@ -29,6 +29,14 @@ requirements: test_environment
 data: requirements
 	$(PYTHON_INTERPRETER) src/data/make_dataset.py data/raw data/processed
 
+## Train Hybrid Model
+train: data
+	$(PYTHON_INTERPRETER) src/models/train_model.py
+
+## Test Hybrid Model Pipeline
+test_model: requirements
+	$(PYTHON_INTERPRETER) test_hybrid_model.py
+
 ## Delete all compiled Python files
 clean:
 	find . -type f -name "*.py[co]" -delete

@@ -18,7 +18,7 @@ def main(input_dir, output_dir):
     logging.info("--- Starting data processing pipeline for final_training_corpus.csv ---")
 
     # 1. Define file paths
-    input_filepath = os.path.join(input_dir, 'final_training_corpus.csv')
+    input_filepath = os.path.join(input_dir, 'pre_augmentation_corpus.csv')
     if not os.path.exists(input_filepath):
         logging.error(f"Input file not found at: {input_filepath}")
         return
