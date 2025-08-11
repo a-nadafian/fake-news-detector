@@ -5,196 +5,182 @@ import argparse
 import torch
 import numpy as np
 import pandas as pd
-import seaborn as sns
-import matplotlib.pyplot as plt
-from datasets import Dataset
-from transformers import (
-    AutoTokenizer,
-    AutoModelForSequenceClassification,
-    Trainer,
-    TrainingArguments
-)
-from sklearn.metrics import classification_report, confusion_matrix
-from src.features.build_features import preprocess_text
+from transformers import AutoTokenizer
+import torch.nn.functional as F
+import json
+import mlflow
+import warnings
+
+# Import the necessary classes from your other scripts
+# This requires your src directory to be in the Python path
+import sys
+
+# Add the 'src' directory to the Python path to allow for package-like imports
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.append(os.path.join(PROJECT_ROOT, 'src'))
+
+from data.advanced_preprocessing import EnhancedFakeNewsPreprocessor
+from models.train_model import HybridFakeNewsClassifier
+
+warnings.filterwarnings('ignore')
 
 
-def predict_sentence(text, model, tokenizer, device="cpu"):
+class Predictor:
     """
-    Predict whether a given text is fake or real news.
-    
-    Args:
-        text (str): Raw text input to classify
-        model: Loaded transformer model
-        tokenizer: Loaded tokenizer
-        device (str): Device to run inference on ('cpu' or 'cuda')
-        
-    Returns:
-        dict: Prediction results with label and confidence
+    A class to load a trained model and make predictions on new text.
     """
-    # Preprocess the text using the same pipeline as training
-    preprocessed_text = preprocess_text(text)
-    
-    # Tokenize the preprocessed text
-    inputs = tokenizer(
-        preprocessed_text,
-        padding='max_length',
-        truncation=True,
-        max_length=512,
-        return_tensors='pt'
-    ).to(device)
-    
-    # Get model prediction
-    with torch.no_grad():
-        outputs = model(**inputs)
-        probabilities = torch.softmax(outputs.logits, dim=1)
-        predicted_class = torch.argmax(probabilities, dim=1).item()
-        confidence = probabilities[0][predicted_class].item()
 
-    # Map prediction to label using model config (0: Fake, 1: Real)
-    id2label = getattr(model.config, 'id2label', {0: 'Fake', 1: 'Real'})
-    label2id = getattr(model.config, 'label2id', {'Fake': 0, 'Real': 1})
-    predicted_label = id2label.get(predicted_class, str(predicted_class))
-    
-    return {
-        "text": text,
-        "preprocessed_text": preprocessed_text,
-        "prediction": predicted_label,
-        "confidence": confidence,
-        "probabilities": {
-            "Fake": probabilities[0][label2id['Fake']].item(),
-            "Real": probabilities[0][label2id['Real']].item()
-        }
-    }
+    def __init__(self, model_uri):
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+        # Load model configuration
+        config_path = os.path.join(model_uri.replace("runs:", "/mlruns/0").replace("/best_model", ""),
+                                   "artifacts/best_model/data/model_config.json")
+
+        # A fallback for older MLflow versions
+        if not os.path.exists(config_path):
+            config_path = os.path.join(model_uri.replace("runs:", "mlruns/0").replace("/best_model", ""),
+                                       "artifacts/model/data/model_config.json")
+
+        with open(config_path, 'r') as f:
+            self.config = json.load(f)
+
+        # Load the model from MLflow
+        self.model = mlflow.pytorch.load_model(model_uri)
+        self.model.to(self.device)
+        self.model.eval()
+
+        # Load the tokenizer
+        self.tokenizer = AutoTokenizer.from_pretrained(self.config['bert_model_name'])
+
+        # Initialize the preprocessor used during training
+        self.preprocessor = EnhancedFakeNewsPreprocessor()
+
+    def predict(self, text):
+        """
+        Makes a prediction on a single piece of text.
+        """
+        print(f"\n--- Predicting for text: '{text[:50]}...' ---")
+
+        # 1. Preprocess the text to generate engineered features
+        print("Step 1: Cleaning text and extracting engineered features...")
+        cleaned_text = self.preprocessor.clean_text_enhanced(text)
+        features_dict = self.preprocessor.extract_advanced_features(cleaned_text)
+
+        # Ensure the order of features matches the training configuration
+        engineered_features = [features_dict[col.replace('feature_', '')] for col in self.config['feature_columns'] if
+                               col.startswith('feature_')]
+
+        # Note: TF-IDF features cannot be generated for a single text instance in the same way.
+        # For prediction, we will pass zeros for the TF-IDF part. The model's primary strength
+        # will come from the text content (BERT) and the other engineered features.
+        num_tfidf_features = len([col for col in self.config['feature_columns'] if col.startswith('tfidf_')])
+        engineered_features.extend([0.0] * num_tfidf_features)
+
+        features_tensor = torch.tensor([engineered_features], dtype=torch.float32).to(self.device)
+        print(f"Step 2: Generated {len(engineered_features)} features.")
+
+        # 2. Tokenize the text for the transformer model
+        print("Step 3: Tokenizing text for the model...")
+        inputs = self.tokenizer(
+            cleaned_text,
+            padding='max_length',
+            truncation=True,
+            max_length=self.config['max_token_length'],
+            return_tensors='pt'
+        )
+        inputs = {key: tensor.to(self.device) for key, tensor in inputs.items()}
+        print("Step 4: Text tokenized.")
+
+        # 3. Make the prediction
+        print("Step 5: Making prediction...")
+        with torch.no_grad():
+            model_inputs = {**inputs, 'engineered_features': features_tensor}
+
+            # Handle token_type_ids for different model types
+            if self.model.bert.config.model_type == 'distilbert':
+                model_inputs.pop('token_type_ids', None)
+
+            outputs = self.model(**model_inputs)
+
+            probabilities = F.softmax(outputs['logits'], dim=1)
+            predicted_class = torch.argmax(probabilities, dim=1).item()
+            confidence = probabilities[0][predicted_class].item()
+
+        predicted_label = "Real" if predicted_class == 1 else "Fake"
+
+        print("--- Prediction Complete ---")
+        return predicted_label, confidence
 
 
-def main(config):
+def main(args):
     """
-    Main function to evaluate the fine-tuned model on the unseen test set.
-
-    Args:
-        config (dict): A dictionary containing configuration parameters.
+    Main function to drive the prediction process.
     """
-    print("--- Starting model evaluation pipeline ---")
+    if args.model_uri:
+        model_uri = args.model_uri
+    else:
+        # Find the best run from MLflow automatically
+        print("--- No model URI provided. Finding the best model from MLflow... ---")
+        client = mlflow.tracking.MlflowClient()
+        try:
+            experiment = client.get_experiment_by_name("Default")
+            if not experiment:
+                print("Error: Could not find the 'Default' MLflow experiment.")
+                return
 
-    # 1. Load Fine-Tuned Model and Tokenizer
-    print(f"Loading model and tokenizer from: {config['model_path']}")
-    if not os.path.exists(config['model_path']):
-        print(f"Error: Model not found at {config['model_path']}")
-        print("Please run the training script first (`make train` or `python src/models/train_model.py`).")
-        return
+            best_run = client.search_runs(
+                experiment_ids=[experiment.experiment_id],
+                order_by=["metrics.val_f1 DESC"],
+                max_results=1
+            )[0]
+            model_uri = f"runs:/{best_run.info.run_id}/best_model"
+            print(f"✅ Found best model from run ID: {best_run.info.run_id}")
+        except (IndexError, mlflow.exceptions.RestException):
+            print("Error: No runs found in MLflow. Please train a model first using 'train_model.py'.")
+            return
 
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    tokenizer = AutoTokenizer.from_pretrained(config['model_path'])
-    model = AutoModelForSequenceClassification.from_pretrained(config['model_path']).to(device)
-    print(f"Model loaded successfully on device: {device}")
+    predictor = Predictor(model_uri)
 
-    # 2. Load and Prepare Test Data
-    print(f"Loading dedicated test dataset from: {config['data_path']}")
-    if not os.path.exists(config['data_path']):
-        print(f"Error: Test data file not found at {config['data_path']}")
-        print(
-            "Please run the data processing script first (`make data` or `python src/data/make_dataset.py`) to generate the test set.")
-        return
+    if args.text:
+        label, confidence = predictor.predict(args.text)
+        print(f"\nInput Text: {args.text}")
+        print(f"Predicted Label: {label}")
+        print(f"Confidence: {confidence:.2%}")
+    elif args.csv_file:
+        print(f"\n--- Predicting for CSV file: {args.csv_file} ---")
+        df = pd.read_csv(args.csv_file)
+        if 'text' not in df.columns:
+            print("Error: CSV file must contain a 'text' column.")
+            return
 
-    test_df = pd.read_csv(config['data_path'])
-    test_dataset = Dataset.from_pandas(test_df)
+        predictions = []
+        for text in df['text']:
+            label, _ = predictor.predict(text)
+            predictions.append(label)
 
-    # --- FIX: Ensure all 'text' entries are strings to prevent tokenizer errors ---
-    # This handles any potential null/NaN values loaded from the CSV.
-    def sanitize_text(example):
-        example['text'] = '' if example['text'] is None else str(example['text'])
-        return example
-
-    test_dataset = test_dataset.map(sanitize_text)
-    print(f"Unseen test set loaded and sanitized with {len(test_dataset)} samples.")
-
-    # 3. Tokenize the Test Data
-    def tokenize_function(examples):
-        return tokenizer(examples['text'], padding='max_length', truncation=True, max_length=512)
-
-    print("Tokenizing test data...")
-    tokenized_test_dataset = test_dataset.map(tokenize_function, batched=True)
-
-    # 4. Generate Predictions
-    print("Generating predictions...")
-    eval_args = TrainingArguments(
-        output_dir=os.path.join(config['report_dir'], 'eval_temp'),
-        report_to="none",
-    )
-
-    trainer = Trainer(model=model, args=eval_args)
-    predictions = trainer.predict(tokenized_test_dataset)
-    predicted_labels = np.argmax(predictions.predictions, axis=1)
-    true_labels = predictions.label_ids
-
-    # 5. Calculate Metrics and Generate Reports
-    print("Calculating metrics and generating reports...")
-    os.makedirs(config['report_dir'], exist_ok=True)
-
-    # a) Classification Report
-    report = classification_report(true_labels, predicted_labels, target_names=['Fake (0)', 'Real (1)'])
-    report_path = os.path.join(config['report_dir'], 'classification_report.txt')
-    with open(report_path, 'w') as f:
-        f.write(report)
-    print(f"\nClassification Report:\n\n{report}")
-    print(f"Classification report saved to: {report_path}")
-
-    # b) Confusion Matrix
-    cm = confusion_matrix(true_labels, predicted_labels)
-    plt.figure(figsize=(8, 6))
-    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues',
-                xticklabels=['Fake', 'Real'], yticklabels=['Fake', 'Real'])
-    plt.xlabel('Predicted Label')
-    plt.ylabel('True Label')
-    plt.title('Confusion Matrix on Unseen Test Data')
-
-    cm_path = os.path.join(config['report_dir'], 'confusion_matrix.png')
-    plt.savefig(cm_path)
-    print(f"Confusion matrix visualization saved to: {cm_path}")
-
-    print("\n--- Evaluation complete! ✅ ---")
-    
-    # Demonstrate the new predict_sentence function
-    print("\n--- Testing predict_sentence function ---")
-    
-    # Sample fake news text for testing
-    sample_fake_news = "BREAKING: Scientists discover that drinking hot water with lemon cures all diseases instantly! This revolutionary treatment has been hidden by big pharma for decades."
-    
-    # Sample real news text for testing
-    sample_real_news = "The World Health Organization released new guidelines for COVID-19 prevention measures based on recent scientific studies."
-    
-    # Test predictions
-    print(f"\nTesting fake news sample:")
-    fake_result = predict_sentence(sample_fake_news, model, tokenizer, device)
-    print(f"Original text: {fake_result['text']}")
-    print(f"Preprocessed: {fake_result['preprocessed_text']}")
-    print(f"Prediction: {fake_result['prediction']} (Confidence: {fake_result['confidence']:.3f})")
-    print(f"Probabilities - Real: {fake_result['probabilities']['Real']:.3f}, Fake: {fake_result['probabilities']['Fake']:.3f}")
-    
-    print(f"\nTesting real news sample:")
-    real_result = predict_sentence(sample_real_news, model, tokenizer, device)
-    print(f"Original text: {real_result['text']}")
-    print(f"Preprocessed: {real_result['preprocessed_text']}")
-    print(f"Prediction: {real_result['prediction']} (Confidence: {real_result['confidence']:.3f})")
-    print(f"Probabilities - Real: {real_result['probabilities']['Real']:.3f}, Fake: {real_result['probabilities']['Fake']:.3f}")
+        df['predicted_label'] = predictions
+        output_path = 'predictions.csv'
+        df.to_csv(output_path, index=False)
+        print(f"\n✅ Predictions saved to {output_path}")
 
 
 if __name__ == '__main__':
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    project_root = os.path.dirname(os.path.dirname(script_dir))
-
-    config = {
-        "model_path": os.path.join(project_root, 'models', 'fake-news-detector', 'final_model'),
-        "data_path": os.path.join(project_root, 'data', 'processed', 'test.csv'),
-        "report_dir": os.path.join(project_root, 'reports')
-    }
-
-    parser = argparse.ArgumentParser(description="Evaluate the fine-tuned fake news classification model.")
-    parser.add_argument('--model_path', type=str, default=config['model_path'])
-    parser.add_argument('--data_path', type=str, default=config['data_path'])
-    parser.add_argument('--report_dir', type=str, default=config['report_dir'])
+    parser = argparse.ArgumentParser(description="Make predictions with a trained fake news detector.")
+    parser.add_argument('--text', type=str, help="A single string of text to classify.")
+    parser.add_argument('--csv_file', type=str, help="Path to a CSV file with a 'text' column to classify.")
+    parser.add_argument('--model_uri', type=str,
+                        help="Optional: MLflow URI of a specific model to use (e.g., 'runs:/<run_id>/best_model').")
 
     args = parser.parse_args()
-    config.update(vars(args))
 
-    main(config)
+    if not args.text and not args.csv_file:
+        # Provide example usage if no arguments are given
+        print("--- Example Usage ---")
+        print("To predict a single piece of text:")
+        print('python src/models/predict_model.py --text "This is some news text to classify."')
+        print("\nTo predict for a CSV file:")
+        print('python src/models/predict_model.py --csv_file "path/to/your/file.csv"')
+    else:
+        main(args)
+
