@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+
 """
 Fake News Detector - Streamlit Web Application
 A user-friendly interface for detecting fake news using our trained hybrid model.

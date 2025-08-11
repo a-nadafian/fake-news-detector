@@ -1,224 +1,258 @@
-# Fake News Detector - Deployment Guide
+# 🚀 Deployment Guide
 
-## Overview
+This guide covers various deployment options for the Fake News Detector project.
 
-This guide explains how to deploy and use the Fake News Detector application built with Streamlit. The app provides a user-friendly interface for detecting fake news using a pre-trained BERT-based model.
+## 🌐 GitHub Deployment
 
-## Features
+### 1. Initial Setup
 
-- 🔍 **Single Text Analysis**: Analyze individual news articles or headlines
-- 📊 **Batch Analysis**: Process multiple texts from CSV files
-- 🧪 **Test Examples**: Try the model with pre-defined examples
-- 📈 **Visual Results**: Interactive charts showing prediction confidence
-- 🔧 **Preprocessing Pipeline**: Consistent text preprocessing for accurate predictions
+```bash
+# Clone the repository
+git clone https://github.com/yourusername/fake-news-detector.git
+cd fake-news-detector
 
-## Prerequisites
+# Create and activate virtual environment
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
 
-1. **Python 3.8+** installed
-2. **Trained Model**: Ensure your model is saved at `models/fake-news-detector/final_model/`
-3. **Dependencies**: Install required packages
+# Install dependencies
+pip install -r requirements.txt
+```
 
-## Installation
+### 2. Running the Streamlit App
 
-1. **Clone the repository** (if not already done):
-   ```bash
-   git clone <your-repo-url>
-   cd fake-news-detector
-   ```
+```bash
+# Start the Streamlit app
+streamlit run app.py
 
-2. **Install dependencies**:
-   ```bash
-   pip install -r requirements.txt
-   ```
+# The app will open at http://localhost:8501
+```
 
-3. **Verify model exists**:
-   ```bash
-   ls models/fake-news-detector/final_model/
-   ```
+### 3. GitHub Pages (Optional)
 
-## Running the Application
+For static documentation:
+1. Go to repository Settings > Pages
+2. Select source branch (usually `main`)
+3. Select folder (usually `/docs`)
+4. Save and wait for deployment
 
-### Local Development
+## ☁️ Cloud Deployment
 
-1. **Start the Streamlit app**:
-   ```bash
-   streamlit run app.py
-   ```
+### Streamlit Cloud
 
-2. **Open your browser** and navigate to the URL shown in the terminal (usually `http://localhost:8501`)
+1. **Connect Repository**:
+   - Go to [share.streamlit.io](https://share.streamlit.io)
+   - Sign in with GitHub
+   - Select your repository
 
-### Production Deployment
+2. **Configure App**:
+   - Set main file path: `app.py`
+   - Set Python version: `3.11`
+   - Add requirements.txt path
 
-#### Option 1: Streamlit Cloud (Recommended)
+3. **Deploy**:
+   - Click "Deploy app"
+   - Wait for build completion
+   - Your app will be live at a Streamlit Cloud URL
 
-1. **Push your code to GitHub**
-2. **Go to [share.streamlit.io](https://share.streamlit.io)**
-3. **Connect your GitHub repository**
-4. **Deploy** with the following settings:
-   - Main file path: `app.py`
-   - Python version: 3.8+
+### Heroku
 
-#### Option 2: Heroku
-
-1. **Create a `Procfile`**:
-   ```
-   web: streamlit run app.py --server.port=$PORT --server.address=0.0.0.0
-   ```
-
-2. **Create `setup.sh`**:
-   ```bash
-   mkdir -p ~/.streamlit/
-   echo "\
-   [server]\n\
-   headless = true\n\
-   port = $PORT\n\
-   enableCORS = false\n\
-   \n\
-   " > ~/.streamlit/config.toml
-   ```
-
-3. **Deploy to Heroku**:
+1. **Create Heroku App**:
    ```bash
    heroku create your-app-name
+   ```
+
+2. **Add Buildpacks**:
+   ```bash
+   heroku buildpacks:add heroku/python
+   ```
+
+3. **Deploy**:
+   ```bash
    git push heroku main
    ```
 
-#### Option 3: Docker
+### Google Cloud Platform
 
-1. **Create `Dockerfile`**:
-   ```dockerfile
-   FROM python:3.8-slim
-   
-   WORKDIR /app
-   COPY requirements.txt .
-   RUN pip install -r requirements.txt
-   
-   COPY . .
-   
-   EXPOSE 8501
-   CMD ["streamlit", "run", "app.py", "--server.port=8501", "--server.address=0.0.0.0"]
-   ```
-
-2. **Build and run**:
+1. **Enable App Engine**:
    ```bash
-   docker build -t fake-news-detector .
-   docker run -p 8501:8501 fake-news-detector
+   gcloud app create
    ```
 
-## Usage Guide
+2. **Deploy**:
+   ```bash
+   gcloud app deploy
+   ```
 
-### Single Text Analysis
+## 🐳 Docker Deployment
 
-1. **Navigate to the "Single Text Analysis" tab**
-2. **Enter news text** in the text area
-3. **Click "Analyze Text"**
-4. **View results**:
-   - Prediction (Real/Fake)
-   - Confidence score
-   - Probability chart
-   - Preprocessed text (expandable)
+### 1. Create Dockerfile
 
-### Batch Analysis
+```dockerfile
+FROM python:3.11-slim
 
-1. **Navigate to the "Batch Analysis" tab**
-2. **Upload a CSV file** with a 'text' column
-3. **Click "Analyze All Texts"**
-4. **View results**:
-   - Summary table
-   - Statistics (total, fake, real counts)
+WORKDIR /app
 
-### Test Examples
+COPY requirements.txt .
+RUN pip install -r requirements.txt
 
-1. **Navigate to the "Test Examples" tab**
-2. **Select example category** (Fake/Real news)
-3. **Choose specific example**
-4. **Click "Test This Example"**
-5. **View prediction results**
+COPY . .
 
-## Testing the Preprocessing Fix
+EXPOSE 8501
 
-To verify that the preprocessing pipeline works correctly:
-
-```bash
-python test_preprocessing.py
+CMD ["streamlit", "run", "app.py", "--server.port=8501", "--server.address=0.0.0.0"]
 ```
 
-This will test the preprocessing function with various inputs and show you the cleaned text output.
-
-## Model Testing
-
-Test the model with external data:
+### 2. Build and Run
 
 ```bash
-python src/models/predict_model.py
+# Build image
+docker build -t fake-news-detector .
+
+# Run container
+docker run -p 8501:8501 fake-news-detector
 ```
 
-This will:
-- Load your trained model
-- Test it with sample fake and real news
-- Show predictions and confidence scores
+## 🔧 Environment Configuration
 
-## Troubleshooting
+### Environment Variables
+
+Create a `.env` file (not committed to git):
+
+```env
+# Model paths
+MODEL_PATH=models/fake_news_detector/final_model
+
+# API keys (if using external services)
+HUGGINGFACE_TOKEN=your_token_here
+
+# App settings
+STREAMLIT_SERVER_PORT=8501
+STREAMLIT_SERVER_ADDRESS=0.0.0.0
+```
+
+### Configuration Files
+
+The app automatically detects configuration from:
+- `models/fake_news_detector/final_model/model_config.json`
+- Environment variables
+- Command line arguments
+
+## 📊 Monitoring and Logging
+
+### Streamlit Built-in
+
+- Access logs via Streamlit Cloud dashboard
+- Monitor app performance and errors
+- View user analytics
+
+### Custom Logging
+
+```python
+import logging
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+# Log important events
+logger.info("Model loaded successfully")
+logger.error("Error occurred during prediction")
+```
+
+## 🔒 Security Considerations
+
+### Production Deployment
+
+1. **HTTPS**: Always use HTTPS in production
+2. **Authentication**: Consider adding user authentication
+3. **Rate Limiting**: Implement API rate limiting
+4. **Input Validation**: Validate all user inputs
+5. **Model Security**: Protect model files from unauthorized access
+
+### Environment Variables
+
+- Never commit sensitive information to git
+- Use environment variables for configuration
+- Rotate API keys regularly
+
+## 🚨 Troubleshooting
 
 ### Common Issues
 
-1. **Model not found error**:
-   - Ensure the model is saved at `models/fake-news-detector/final_model/`
-   - Check file permissions
+1. **Model Not Found**:
+   - Check model path in configuration
+   - Ensure model files are properly uploaded
+   - Verify file permissions
 
-2. **Import errors**:
-   - Verify all dependencies are installed: `pip install -r requirements.txt`
-   - Check Python path includes the `src` directory
+2. **Dependencies Issues**:
+   - Update pip: `pip install --upgrade pip`
+   - Clear cache: `pip cache purge`
+   - Reinstall: `pip install -r requirements.txt --force-reinstall`
 
-3. **CUDA/GPU issues**:
-   - The app automatically falls back to CPU if CUDA is not available
-   - Check `nvidia-smi` for GPU status
+3. **Port Already in Use**:
+   ```bash
+   # Find process using port 8501
+   lsof -i :8501
+   
+   # Kill process
+   kill -9 <PID>
+   ```
 
-4. **Memory issues**:
-   - Reduce batch size in batch analysis
-   - Close other applications using GPU memory
+### Performance Optimization
 
-### Performance Tips
+1. **Model Caching**: Use Streamlit's caching for model loading
+2. **Batch Processing**: Process multiple texts together when possible
+3. **Resource Limits**: Monitor memory and CPU usage
+4. **CDN**: Use CDN for static assets
 
-1. **First run**: The app downloads NLTK resources on first use
-2. **Model loading**: Uses Streamlit caching for faster subsequent loads
-3. **Batch processing**: Progress bar shows processing status
-4. **Memory management**: Large files are processed in chunks
+## 📈 Scaling
 
-## API Usage
+### Horizontal Scaling
 
-For programmatic access, you can import the prediction function:
+- Deploy multiple instances behind a load balancer
+- Use container orchestration (Kubernetes, Docker Swarm)
+- Implement session management for user state
 
-```python
-from src.models.predict_model import predict_sentence
-from transformers import AutoTokenizer, AutoModelForSequenceClassification
+### Vertical Scaling
 
-# Load model
-model = AutoModelForSequenceClassification.from_pretrained('path/to/model')
-tokenizer = AutoTokenizer.from_pretrained('path/to/model')
+- Increase server resources (CPU, RAM)
+- Use more powerful GPUs for inference
+- Optimize model architecture
 
-# Predict
-result = predict_sentence("Your news text here", model, tokenizer)
-print(f"Prediction: {result['prediction']}")
-print(f"Confidence: {result['confidence']:.3f}")
+## 🔄 Continuous Deployment
+
+### GitHub Actions
+
+The project includes GitHub Actions for:
+- Automated testing
+- Code quality checks
+- Automatic deployment to staging/production
+
+### Manual Deployment
+
+```bash
+# Pull latest changes
+git pull origin main
+
+# Install/update dependencies
+pip install -r requirements.txt
+
+# Restart application
+# (Depends on your deployment method)
 ```
 
-## Contributing
+## 📞 Support
 
-1. **Fork the repository**
-2. **Create a feature branch**
-3. **Make your changes**
-4. **Test thoroughly**
-5. **Submit a pull request**
-
-## License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-## Support
-
-For issues and questions:
+For deployment issues:
 1. Check the troubleshooting section
-2. Review the code comments
-3. Open an issue on GitHub
-4. Contact the development team 
+2. Review GitHub Issues
+3. Create a new issue with detailed information
+4. Contact the maintainers
+
+---
+
+**Note**: Always test your deployment in a staging environment before going to production. 

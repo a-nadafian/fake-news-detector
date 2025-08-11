@@ -1,0 +1,58 @@
+# Auto detect text files and perform LF normalization
+* text=auto
+
+# Python files
+*.py text diff=python
+
+# Jupyter notebooks
+*.ipynb text
+
+# Documentation
+*.md text diff=markdown
+*.rst text
+
+# Configuration files
+*.yml text
+*.yaml text
+*.toml text
+*.ini text
+*.cfg text
+
+# Requirements and dependencies
+requirements.txt text
+setup.py text
+Pipfile text
+Pipfile.lock text
+
+# License
+LICENSE text
+
+# Git ignore and attributes
+.gitignore text
+.gitattributes text
+
+# Binary files (should not be modified)
+*.pth binary
+*.pt binary
+*.bin binary
+*.h5 binary
+*.hdf5 binary
+*.pkl binary
+*.joblib binary
+*.zip binary
+*.tar.gz binary
+*.rar binary
+*.7z binary
+
+# Images
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.svg text
+
+# Data files
+*.csv text
+*.json text
+*.tsv text
+*.txt text
